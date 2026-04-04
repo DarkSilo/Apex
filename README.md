@@ -152,6 +152,10 @@ Required environment variables for backend project:
 - `JWT_EXPIRES_IN`: token lifetime (example: `7d`)
 - `CLIENT_URL`: deployed frontend URL for CORS (example: `https://your-frontend.vercel.app`)
 
+`CLIENT_URL` can be set as a full origin or a bare hostname. The server normalizes it to a valid CORS origin.
+
+For Vercel preview deployments, the backend also allows `https://*.vercel.app` origins so preview frontend URLs can reach the API without manual env changes on every deployment.
+
 Backend routes remain under `/api/*` and are handled by `server/api/index.ts`.
 
 Troubleshooting:
