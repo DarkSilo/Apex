@@ -1,6 +1,29 @@
 import axios from "axios";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+const normalizeApiBaseUrl = (value: string | undefined): string => {
+  const rawValue = value?.trim();
+
+  if (!rawValue) {
+    return "/api";
+  }
+
+  if (rawValue.startsWith("/")) {
+    return rawValue.replace(/\/+$/, "") || "/api";
+  }
+
+  const absoluteValue = /^https?:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`;
+  const url = new URL(absoluteValue);
+
+  if (url.pathname === "/" || url.pathname === "") {
+    url.pathname = "/api";
+  } else if (!url.pathname.endsWith("/api")) {
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/api`;
+  }
+
+  return url.toString().replace(/\/+$/, "");
+};
+
+const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -12,7 +35,7 @@ const api = axios.create({
 // Request interceptor — attach JWT
 api.interceptors.request.use(
   (config) => {
-    if (typeof window !== "undefined") {
+    if (globalThis.window !== undefined) {
       const token = localStorage.getItem("accessToken");
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -46,17 +69,17 @@ api.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return api(originalRequest);
         }
-      } catch (refreshError) {
+      } catch {
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("user");
-        if (typeof window !== "undefined") {
-          window.location.href = "/login";
+        if (globalThis.window !== undefined) {
+          globalThis.window.location.href = "/login";
         }
       }
     }
 
-    return Promise.reject(error);
+    throw error;
   }
 );
 

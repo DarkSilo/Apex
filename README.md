@@ -128,6 +128,13 @@ Set these environment variables in your Vercel project:
 - `NEXT_PUBLIC_API_URL`: Public backend API base URL (example: `https://your-api-domain.com/api`)
 - `API_PROXY_TARGET` (optional): Backend origin used by Next.js rewrite when calling `/api/*` from the browser (example: `https://your-api-domain.com`)
 
+`NEXT_PUBLIC_API_URL` can be set as one of these:
+
+- `https://your-api-domain.com/api`
+- `https://your-api-domain.com`
+- `your-api-domain.com`
+- `/api` for same-origin proxying
+
 Behavior:
 
 - If `NEXT_PUBLIC_API_URL` is set, client requests go directly to that URL.
