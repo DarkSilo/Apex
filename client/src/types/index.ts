@@ -63,10 +63,17 @@ export interface Payment {
   memberId: User | string;
   amount: number;
   date: string;
-  status: "completed" | "pending" | "failed" | "refunded";
+  status: "requested" | "submitted" | "completed" | "pending" | "failed" | "refunded";
   method: "cash" | "card" | "bank_transfer" | "online";
   description: string;
   receiptNumber: string;
+  requestedBy?: User | string;
+  paidAt?: string;
+  memberReference?: string;
+  memberNote?: string;
+  verifiedBy?: User | string;
+  verifiedAt?: string;
+  verificationNote?: string;
   createdAt: string;
   updatedAt: string;
 }

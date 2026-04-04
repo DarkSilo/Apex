@@ -29,6 +29,8 @@ export function getStatusColor(status: string): string {
     active: "badge-success",
     inactive: "badge-neutral",
     completed: "badge-success",
+    requested: "badge-info",
+    submitted: "badge-warning",
     pending: "badge-warning",
     failed: "badge-danger",
     refunded: "badge-info",

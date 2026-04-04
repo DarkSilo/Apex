@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { DollarSign, Plus, Search, Receipt, XCircle, TrendingUp } from "lucide-react";
+import { DollarSign, Plus, Receipt, XCircle, TrendingUp, CheckCircle2 } from "lucide-react";
 import Topbar from "@/components/layout/Topbar";
 import api from "@/lib/api";
 import { Payment, User } from "@/types";
@@ -19,9 +19,10 @@ interface PaymentModalProps {
   onClose: () => void;
   onSave: () => void;
   members: User[];
+  mode: "direct" | "request";
 }
 
-function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
+function AdminPaymentModal({ onClose, onSave, members, mode }: PaymentModalProps) {
   const [form, setForm] = useState({
     memberId: "", amount: 2500, date: new Date().toISOString().split("T")[0],
     status: "completed", method: "cash", description: "Membership Fee",
@@ -47,10 +48,20 @@ function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post("/payments", form);
+      if (mode === "request") {
+        await api.post("/payments/request", {
+          memberId: form.memberId,
+          amount: form.amount,
+          date: form.date,
+          method: form.method,
+          description: form.description,
+        });
+      } else {
+        await api.post("/payments", form);
+      }
       onSave(); onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to record payment");
+      setError(err.response?.data?.message || "Failed to save payment");
       setLoading(false);
     }
   };
@@ -66,7 +77,7 @@ function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
         className="glass-card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold text-surface-100">Record Payment</h2>
+          <h2 className="text-lg font-bold text-surface-100">{mode === "request" ? "Create Payment Request" : "Record Direct Payment"}</h2>
           <button onClick={onClose}><XCircle className="w-5 h-5 text-surface-500" /></button>
         </div>
         {error && <div className="mb-4 p-3 rounded-lg bg-danger-500/10 border border-danger-500/20 text-danger-400 text-sm">{error}</div>}
@@ -97,11 +108,15 @@ function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
             </div>
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Status</label>
-              <select name="status" value={form.status} onChange={handleChange} className="input-field" id="pay-status">
-                {["completed", "pending", "failed"].map(s => (
-                  <option key={s} value={s} className="capitalize">{s}</option>
-                ))}
-              </select>
+              {mode === "request" ? (
+                <div className="input-field text-surface-300">requested</div>
+              ) : (
+                <select name="status" value={form.status} onChange={handleChange} className="input-field" id="pay-status">
+                  {["completed", "pending", "failed"].map(s => (
+                    <option key={s} value={s} className="capitalize">{s}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
           <div>
@@ -111,7 +126,7 @@ function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
             <button type="submit" disabled={loading} className="btn-primary flex-1 flex items-center justify-center" id="pay-save">
-              {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : "Record Payment"}
+              {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : mode === "request" ? "Create Request" : "Record Payment"}
             </button>
           </div>
         </form>
@@ -120,15 +135,134 @@ function PaymentModal({ onClose, onSave, members }: PaymentModalProps) {
   );
 }
 
+function MemberSubmitModal({
+  payment,
+  onClose,
+  onSave,
+}: {
+  payment: Payment;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const [method, setMethod] = useState<"cash" | "card" | "bank_transfer" | "online">("online");
+  const [memberReference, setMemberReference] = useState("");
+  const [memberNote, setMemberNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await api.patch(`/payments/${payment._id}/submit`, { method, memberReference, memberNote });
+      onSave();
+      onClose();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to submit payment");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="glass-card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-surface-100 mb-4">Submit Mock Payment</h2>
+        <p className="text-xs text-surface-400 mb-4">Amount: {formatCurrency(payment.amount)}</p>
+        {error && <div className="mb-3 p-2 rounded bg-danger-500/10 border border-danger-500/20 text-danger-400 text-xs">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs text-surface-400 mb-1">Method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value as any)} className="input-field">
+              {["cash", "card", "bank_transfer", "online"].map((m) => (
+                <option key={m} value={m}>{m.replace("_", " ")}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-surface-400 mb-1">Payment Reference</label>
+            <input value={memberReference} onChange={(e) => setMemberReference(e.target.value)} className="input-field" placeholder="e.g. MOCKTXN-12345" required />
+          </div>
+          <div>
+            <label className="block text-xs text-surface-400 mb-1">Note (optional)</label>
+            <input value={memberNote} onChange={(e) => setMemberNote(e.target.value)} className="input-field" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={loading} className="btn-primary flex-1">{loading ? "Submitting..." : "Submit Payment"}</button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function VerifyModal({
+  payment,
+  onClose,
+  onSave,
+}: {
+  payment: Payment;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const [verificationNote, setVerificationNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleVerify = async (isApproved: boolean) => {
+    setLoading(true);
+    setError("");
+    try {
+      await api.patch(`/payments/${payment._id}/verify`, { isApproved, verificationNote });
+      onSave();
+      onClose();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to verify payment");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="glass-card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-surface-100 mb-2">Verify Member Payment</h2>
+        <p className="text-xs text-surface-400 mb-1">Reference: {payment.memberReference || "N/A"}</p>
+        <p className="text-xs text-surface-400 mb-4">Amount: {formatCurrency(payment.amount)}</p>
+        {error && <div className="mb-3 p-2 rounded bg-danger-500/10 border border-danger-500/20 text-danger-400 text-xs">{error}</div>}
+        <div>
+          <label className="block text-xs text-surface-400 mb-1">Verification note</label>
+          <input value={verificationNote} onChange={(e) => setVerificationNote(e.target.value)} className="input-field" />
+        </div>
+        <div className="flex gap-3 mt-4">
+          <button type="button" onClick={() => handleVerify(false)} disabled={loading} className="btn-danger flex-1">Reject</button>
+          <button type="button" onClick={() => handleVerify(true)} disabled={loading} className="btn-primary flex-1">Approve</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export default function PaymentsPage() {
   const { user } = useAuth();
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [members, setMembers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterMethod, setFilterMethod] = useState("");
-  const [showModal, setShowModal] = useState(false);
+  const [showDirectModal, setShowDirectModal] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [submitTarget, setSubmitTarget] = useState<Payment | null>(null);
+  const [verifyTarget, setVerifyTarget] = useState<Payment | null>(null);
   const [totalRevenue, setTotalRevenue] = useState(0);
+  const actionablePayments = payments.filter((p) => {
+    const normalizedStatus = String(p.status || "").trim().toLowerCase();
+    return normalizedStatus === "requested" || normalizedStatus === "pending";
+  });
+  const myActionableCount = actionablePayments.length;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -137,18 +271,19 @@ export default function PaymentsPage() {
       if (filterStatus) params.set("status", filterStatus);
       if (filterMethod) params.set("method", filterMethod);
 
-      const [paymentsRes, membersRes] = await Promise.all([
-        api.get(`/payments?${params}`),
-        api.get("/members?role=member&limit=100"),
-      ]);
+      const requests: Promise<any>[] = [api.get(`/payments?${params}`)];
+      if (user?.role === "admin") {
+        requests.push(api.get("/members?role=member&limit=100"));
+      }
+      const [paymentsRes, membersRes] = await Promise.all(requests);
 
       const pList = paymentsRes.data || [];
       setPayments(pList);
-      setMembers(membersRes.data.members || []);
+      setMembers(membersRes?.data?.members || []);
       setTotalRevenue(pList.filter((p: Payment) => p.status === "completed").reduce((s: number, p: Payment) => s + p.amount, 0));
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [filterStatus, filterMethod]);
+  }, [filterStatus, filterMethod, user?.role]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -179,15 +314,51 @@ export default function PaymentsPage() {
 
   const statusSummary = [
     { label: "Total Revenue", value: formatCurrency(totalRevenue), color: "text-success-400" },
+    { label: "Requested", value: payments.filter(p => p.status === "requested").length, color: "text-brand-400" },
+    { label: "Submitted", value: payments.filter(p => p.status === "submitted").length, color: "text-warning-400" },
     { label: "Completed", value: payments.filter(p => p.status === "completed").length, color: "text-success-400" },
-    { label: "Pending", value: payments.filter(p => p.status === "pending").length, color: "text-warning-400" },
-    { label: "Total Records", value: payments.length, color: "text-brand-400" },
+    { label: "Total Records", value: payments.length, color: "text-surface-300" },
   ];
 
   return (
     <div>
       <Topbar title="Payments" subtitle="Track fees and financial transactions" />
       <div className="p-8 space-y-6">
+        {normalizedRole === "member" && (
+          <div className="glass-card p-4 border border-brand-500/20">
+            <p className="text-sm text-surface-200">
+              You have <span className="font-semibold text-brand-300">{myActionableCount}</span> payment request{myActionableCount === 1 ? "" : "s"} to submit.
+            </p>
+            <p className="text-xs text-surface-500 mt-1">Use the Submit Payment button in rows marked requested or pending.</p>
+          </div>
+        )}
+
+        {normalizedRole === "member" && myActionableCount > 0 && (
+          <div className="glass-card p-4 border border-success-500/20">
+            <h3 className="text-sm font-semibold text-surface-100 mb-3">Payment Requests Awaiting Your Submission</h3>
+            <div className="space-y-2">
+              {actionablePayments.map((payment) => {
+                const member = payment.memberId as User;
+                return (
+                  <div key={payment._id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-lg bg-surface-800/40 border border-surface-700/50 p-3">
+                    <div>
+                      <p className="text-sm text-surface-200 font-medium">{formatCurrency(payment.amount)} · {payment.description}</p>
+                      <p className="text-xs text-surface-500">{member?.name || "Member"} · {formatDate(payment.date)} · {String(payment.status).toLowerCase()}</p>
+                    </div>
+                    <button
+                      onClick={() => setSubmitTarget(payment)}
+                      className="btn-primary px-3 py-1.5 text-xs self-start md:self-auto"
+                      id={`submit-top-${payment._id}`}
+                    >
+                      Submit Payment
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statusSummary.map((s) => (
@@ -203,7 +374,7 @@ export default function PaymentsPage() {
           <div className="flex flex-wrap gap-3">
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="input-field w-36" id="pay-filter-status">
               <option value="">All Status</option>
-              {["completed", "pending", "failed", "refunded"].map(s => (
+              {["requested", "submitted", "completed", "pending", "failed", "refunded"].map(s => (
                 <option key={s} value={s} className="capitalize">{s}</option>
               ))}
             </select>
@@ -214,13 +385,16 @@ export default function PaymentsPage() {
               ))}
             </select>
           </div>
-          {user?.role === "admin" && (
+          {normalizedRole === "admin" && (
             <div className="flex gap-3">
               <a href="/reports" className="btn-secondary flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" /> View Reports
               </a>
-              <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2" id="add-payment-btn">
-                <Plus className="w-4 h-4" /> Record Payment
+              <button onClick={() => setShowRequestModal(true)} className="btn-secondary flex items-center gap-2" id="add-payment-request-btn">
+                <Plus className="w-4 h-4" /> Create Request
+              </button>
+              <button onClick={() => setShowDirectModal(true)} className="btn-primary flex items-center gap-2" id="add-payment-btn">
+                <Plus className="w-4 h-4" /> Record Direct Payment
               </button>
             </div>
           )}
@@ -237,7 +411,7 @@ export default function PaymentsPage() {
                 <th>Method</th>
                 <th>Description</th>
                 <th>Status</th>
-                <th>Receipt</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -257,6 +431,7 @@ export default function PaymentsPage() {
                 ) : (
                   payments.map((p, i) => {
                     const member = p.memberId as User;
+                    const normalizedStatus = String(p.status || "").trim().toLowerCase();
                     return (
                       <motion.tr key={p._id} custom={i} variants={rowVariants} initial="hidden" animate="show" exit="exit" layout>
                         <td>
@@ -274,11 +449,35 @@ export default function PaymentsPage() {
                         <td><span className="text-surface-400 text-sm">{formatDate(p.date)}</span></td>
                         <td><span className="text-surface-300 capitalize text-sm">{p.method?.replace("_", " ")}</span></td>
                         <td><span className="text-surface-400 text-sm truncate max-w-[150px] block">{p.description}</span></td>
-                        <td><span className={`badge ${getStatusColor(p.status)} capitalize`}>{p.status}</span></td>
                         <td>
-                          <button onClick={() => handlePrint(p)} className="p-1.5 hover:bg-surface-700 rounded-lg text-surface-400 hover:text-brand-400 transition-colors" title="Print Receipt" id={`receipt-${p._id}`}>
-                            <Receipt className="w-4 h-4" />
-                          </button>
+                          <div className="space-y-1">
+                            <span className={`badge ${getStatusColor(normalizedStatus)} capitalize`}>{normalizedStatus}</span>
+                            {p.memberReference && <p className="text-[10px] text-surface-500">Ref: {p.memberReference}</p>}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            {normalizedStatus === "completed" && (
+                              <button onClick={() => handlePrint(p)} className="p-1.5 hover:bg-surface-700 rounded-lg text-surface-400 hover:text-brand-400 transition-colors" title="Print Receipt" id={`receipt-${p._id}`}>
+                                <Receipt className="w-4 h-4" />
+                              </button>
+                            )}
+                            {normalizedRole === "member" && (normalizedStatus === "requested" || normalizedStatus === "pending") && (
+                              <button
+                                onClick={() => setSubmitTarget(p)}
+                                className="btn-primary px-2.5 py-1.5 text-xs"
+                                title="Submit payment"
+                                id={`pay-now-${p._id}`}
+                              >
+                                Submit Payment
+                              </button>
+                            )}
+                            {normalizedRole === "admin" && normalizedStatus === "submitted" && (
+                              <button onClick={() => setVerifyTarget(p)} className="p-1.5 hover:bg-surface-700 rounded-lg text-surface-400 hover:text-success-400 transition-colors" title="Verify payment" id={`verify-${p._id}`}>
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </motion.tr>
                     );
@@ -291,7 +490,19 @@ export default function PaymentsPage() {
       </div>
 
       <AnimatePresence>
-        {showModal && <PaymentModal members={members} onClose={() => setShowModal(false)} onSave={fetchData} />}
+        {showDirectModal && <AdminPaymentModal mode="direct" members={members} onClose={() => setShowDirectModal(false)} onSave={fetchData} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showRequestModal && <AdminPaymentModal mode="request" members={members} onClose={() => setShowRequestModal(false)} onSave={fetchData} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {submitTarget && <MemberSubmitModal payment={submitTarget} onClose={() => setSubmitTarget(null)} onSave={fetchData} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {verifyTarget && <VerifyModal payment={verifyTarget} onClose={() => setVerifyTarget(null)} onSave={fetchData} />}
       </AnimatePresence>
     </div>
   );
