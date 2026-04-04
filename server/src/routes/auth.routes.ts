@@ -1,8 +1,22 @@
 import { Router } from "express";
-import { register, login, refreshToken, getMe, updateMe } from "../controllers/auth.controller";
+import {
+	register,
+	login,
+	refreshToken,
+	getMe,
+	updateMe,
+	changeMyPassword,
+	deleteMyAccount,
+} from "../controllers/auth.controller";
 import { authenticate } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { registerSchema, loginSchema, updateMeSchema } from "../validators/auth.validator";
+import {
+	registerSchema,
+	loginSchema,
+	updateMeSchema,
+	changePasswordSchema,
+	deleteMyAccountSchema,
+} from "../validators/auth.validator";
 
 const router = Router();
 
@@ -11,5 +25,7 @@ router.post("/login", validate(loginSchema), login);
 router.post("/refresh", refreshToken);
 router.get("/me", authenticate, getMe);
 router.put("/me", authenticate, validate(updateMeSchema), updateMe);
+router.put("/me/password", authenticate, validate(changePasswordSchema), changeMyPassword);
+router.delete("/me", authenticate, validate(deleteMyAccountSchema), deleteMyAccount);
 
 export default router;

@@ -181,3 +181,79 @@ export const updateMe = async (req: AuthRequest, res: Response): Promise<void> =
     res.status(500).json({ message: "Failed to update profile", error: error.message });
   }
 };
+
+export const changeMyPassword = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordMatches) {
+      res.status(400).json({ message: "Current password is incorrect." });
+      return;
+    }
+
+    const samePassword = await bcrypt.compare(newPassword, user.password);
+    if (samePassword) {
+      res.status(400).json({ message: "New password must be different from current password." });
+      return;
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+
+    res.json({ message: "Password changed successfully." });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to change password", error: error.message });
+  }
+};
+
+export const deleteMyAccount = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
+    const { currentPassword } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordMatches) {
+      res.status(400).json({ message: "Current password is incorrect." });
+      return;
+    }
+
+    if (user.role === "admin") {
+      const activeAdminCount = await User.countDocuments({ role: "admin", status: "active" });
+      if (activeAdminCount <= 1) {
+        res.status(400).json({ message: "Cannot delete the last active admin account." });
+        return;
+      }
+    }
+
+    await User.findByIdAndDelete(userId);
+
+    res.json({ message: "Account deleted successfully." });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to delete account", error: error.message });
+  }
+};

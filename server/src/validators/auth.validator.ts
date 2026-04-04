@@ -21,3 +21,12 @@ export const updateMeSchema = z.object({
   sport: z.string().min(1).optional(),
   membershipType: z.enum(["monthly", "annual", "lifetime"]).optional(),
 });
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+});
+
+export const deleteMyAccountSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+});

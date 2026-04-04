@@ -143,7 +143,7 @@ function SmallListCard({
 }
 
 export default function DashboardPage() {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const role = user?.role ?? "member";
   const copy = roleCopy[role];
   const currentUserId = user?._id || user?.id;
@@ -154,28 +154,11 @@ export default function DashboardPage() {
   const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
   const [monthlyRevenue, setMonthlyRevenue] = useState<Array<{ month: string; revenue: number; payments: number }>>([]);
   const [myRoster, setMyRoster] = useState<User[]>([]);
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileMessage, setProfileMessage] = useState("");
-  const [profileForm, setProfileForm] = useState({
-    name: user?.name || "",
-    phone: user?.phone || "",
-    sport: user?.sport || "Cricket",
-    membershipType: user?.membershipType || "monthly",
-  });
   const [loading, setLoading] = useState(true);
 
   const attendanceCount = user?.attendance?.length ?? 0;
   const latestPayment = recentPayments[0];
   const latestPaymentValue = latestPayment ? formatCurrency(latestPayment.amount) : "—";
-
-  useEffect(() => {
-    setProfileForm({
-      name: user?.name || "",
-      phone: user?.phone || "",
-      sport: user?.sport || "Cricket",
-      membershipType: user?.membershipType || "monthly",
-    });
-  }, [user?.name, user?.phone, user?.sport, user?.membershipType]);
 
   useEffect(() => {
     if (!user) return;
@@ -257,29 +240,6 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [user, role, currentUserId]);
-
-  const handleProfileSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setProfileSaving(true);
-    setProfileMessage("");
-    try {
-      const payload: any = {
-        name: profileForm.name,
-        phone: profileForm.phone,
-        sport: profileForm.sport,
-      };
-      if (role === "member") {
-        payload.membershipType = profileForm.membershipType;
-      }
-      await api.put("/auth/me", payload);
-      await refreshUser();
-      setProfileMessage("Profile updated successfully.");
-    } catch (error: any) {
-      setProfileMessage(error.response?.data?.message || "Failed to update profile.");
-    } finally {
-      setProfileSaving(false);
-    }
-  };
 
   const adminMetrics: DashboardMetric[] = [
     {
@@ -704,73 +664,6 @@ export default function DashboardPage() {
                 </div>
               ))}
             </SmallListCard>
-          </div>
-        )}
-
-        {(role === "coach" || role === "member") && (
-          <div className="glass-card p-6">
-            <h3 className="font-semibold text-surface-100 mb-4">Profile Management</h3>
-            <form onSubmit={handleProfileSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="profile-name" className="block text-xs text-surface-400 mb-1.5">Name</label>
-                <input
-                  id="profile-name"
-                  value={profileForm.name}
-                  onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))}
-                  className="input-field"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="profile-phone" className="block text-xs text-surface-400 mb-1.5">Phone</label>
-                <input
-                  id="profile-phone"
-                  value={profileForm.phone}
-                  onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  className="input-field"
-                />
-              </div>
-              <div>
-                <label htmlFor="profile-sport" className="block text-xs text-surface-400 mb-1.5">Sport</label>
-                <select
-                  id="profile-sport"
-                  value={profileForm.sport}
-                  onChange={(e) => setProfileForm((prev) => ({ ...prev, sport: e.target.value }))}
-                  className="input-field"
-                >
-                  {["Cricket", "Football", "Badminton"].map((sport) => (
-                    <option key={sport} value={sport}>{sport}</option>
-                  ))}
-                </select>
-              </div>
-              {role === "member" && (
-                <div>
-                  <label htmlFor="profile-membership" className="block text-xs text-surface-400 mb-1.5">Membership Type</label>
-                  <select
-                    id="profile-membership"
-                    value={profileForm.membershipType}
-                    onChange={(e) =>
-                      setProfileForm((prev) => ({
-                        ...prev,
-                        membershipType: e.target.value as "monthly" | "annual" | "lifetime",
-                      }))
-                    }
-                    className="input-field"
-                  >
-                    {["monthly", "annual", "lifetime"].map((type) => (
-                      <option key={type} value={type} className="capitalize">{type}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="md:col-span-2 flex items-center gap-3">
-                <button type="submit" className="btn-primary" disabled={profileSaving}>
-                  {profileSaving ? "Saving..." : "Save Profile"}
-                </button>
-                {profileMessage && <p className="text-xs text-surface-400">{profileMessage}</p>}
-              </div>
-            </form>
           </div>
         )}
 
