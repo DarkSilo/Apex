@@ -116,6 +116,13 @@ Prediction endpoint:
 
 The repository includes a root `vercel.json` that builds the Next.js app from `client/`.
 
+You can deploy frontend with either of these Vercel Root Directory settings:
+
+- repository root (`.`)
+- `client/`
+
+The root `vercel.json` auto-detects the working directory so both options work.
+
 Set these environment variables in your Vercel project:
 
 - `NEXT_PUBLIC_API_URL`: Public backend API base URL (example: `https://your-api-domain.com/api`)
@@ -139,3 +146,8 @@ Required environment variables for backend project:
 - `CLIENT_URL`: deployed frontend URL for CORS (example: `https://your-frontend.vercel.app`)
 
 Backend routes remain under `/api/*` and are handled by `server/api/index.ts`.
+
+Troubleshooting:
+
+- If backend Vercel build logs show `npm install --prefix client`, the project is building from repository root and using root `vercel.json` (frontend config).
+- Fix by setting the backend Vercel project's Root Directory to `server` and redeploying.
