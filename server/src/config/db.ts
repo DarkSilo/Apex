@@ -3,18 +3,26 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const connectDB = async (): Promise<void> => {
-  try {
-    const uri = process.env.MONGODB_URI;
-    if (!uri) {
-      throw new Error("MONGODB_URI is not defined in environment variables");
-    }
+let connectionPromise: Promise<typeof mongoose> | null = null;
 
-    await mongoose.connect(uri);
-    console.log("✅ MongoDB connected successfully");
+const connectDB = async (): Promise<void> => {
+  const uri = process.env.MONGODB_URI;
+
+  if (!uri) {
+    throw new Error("MONGODB_URI is not defined in environment variables");
+  }
+
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  connectionPromise ??= mongoose.connect(uri);
+
+  try {
+    await connectionPromise;
   } catch (error) {
-    console.error("❌ MongoDB connection error:", error);
-    process.exit(1);
+    connectionPromise = null;
+    throw error;
   }
 };
 

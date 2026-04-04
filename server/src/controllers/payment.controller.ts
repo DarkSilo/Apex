@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import Payment from "../models/Payment";
 import User from "../models/User";
 import { predictAttendance } from "../services/prediction.service";
@@ -24,6 +25,8 @@ export const getAllPayments = async (req: AuthRequest, res: Response): Promise<v
 
     const payments = await Payment.find(query)
       .populate("memberId", "name email sport")
+      .populate("requestedBy", "name email")
+      .populate("verifiedBy", "name email")
       .sort({ date: -1 });
 
     res.json(payments);
@@ -53,6 +56,110 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
     res.status(201).json({ message: "Payment recorded successfully", payment: populated });
   } catch (error: any) {
     res.status(500).json({ message: "Failed to record payment", error: error.message });
+  }
+};
+
+export const createPaymentRequest = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { memberId, amount, date, method, description } = req.body;
+
+    const member = await User.findById(memberId);
+    if (!member) {
+      res.status(404).json({ message: "Member not found" });
+      return;
+    }
+
+    const payment = await Payment.create({
+      memberId,
+      amount,
+      date: date ? new Date(date) : new Date(),
+      method: method || "online",
+      description: description || "Membership fee request",
+      status: "requested",
+      requestedBy: req.user?.id,
+    });
+
+    const populated = await payment.populate("memberId", "name email sport");
+    res.status(201).json({ message: "Payment request created successfully", payment: populated });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to create payment request", error: error.message });
+  }
+};
+
+export const submitPayment = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const paymentId = req.params.id;
+    const memberId = req.user?.id;
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      res.status(404).json({ message: "Payment request not found" });
+      return;
+    }
+
+    if (payment.memberId.toString() !== memberId) {
+      res.status(403).json({ message: "You can only submit your own payment requests." });
+      return;
+    }
+
+    if (!["requested", "pending"].includes(payment.status)) {
+      res.status(400).json({ message: "Only requested or pending payments can be submitted." });
+      return;
+    }
+
+    payment.method = req.body.method;
+    payment.memberReference = req.body.memberReference;
+    payment.memberNote = req.body.memberNote;
+    payment.paidAt = new Date();
+    payment.status = "submitted";
+    await payment.save();
+
+    res.json({ message: "Payment submitted successfully", payment });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to submit payment", error: error.message });
+  }
+};
+
+export const verifyPayment = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const paymentId = req.params.id;
+    const { isApproved, verificationNote } = req.body;
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      res.status(404).json({ message: "Payment not found" });
+      return;
+    }
+
+    if (payment.status !== "submitted") {
+      res.status(400).json({ message: "Only submitted payments can be verified." });
+      return;
+    }
+
+    payment.status = isApproved ? "completed" : "failed";
+    if (req.user?.id) {
+      payment.verifiedBy = new mongoose.Types.ObjectId(req.user.id);
+    }
+    payment.verifiedAt = new Date();
+    payment.verificationNote = verificationNote;
+    await payment.save();
+
+    if (isApproved) {
+      const member = await User.findById(payment.memberId);
+      if (member && member.status !== "active") {
+        member.status = "active";
+        await member.save();
+      }
+    }
+
+    const populated = await payment.populate("memberId", "name email sport");
+
+    res.json({
+      message: isApproved ? "Payment verified successfully" : "Payment rejected",
+      payment: populated,
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to verify payment", error: error.message });
   }
 };
 
