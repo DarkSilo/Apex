@@ -111,3 +111,31 @@ Prediction endpoint:
 - MongoDB Atlas is required for all deployments.
 - Email notifications are not wired yet; low-stock and schedule warnings are currently UI/API driven.
 - This project uses Windows batch files for local development convenience. For other operating systems, run the npm commands manually in separate terminal sessions.
+
+## Vercel Deployment (Frontend)
+
+The repository includes a root `vercel.json` that builds the Next.js app from `client/`.
+
+Set these environment variables in your Vercel project:
+
+- `NEXT_PUBLIC_API_URL`: Public backend API base URL (example: `https://your-api-domain.com/api`)
+- `API_PROXY_TARGET` (optional): Backend origin used by Next.js rewrite when calling `/api/*` from the browser (example: `https://your-api-domain.com`)
+
+Behavior:
+
+- If `NEXT_PUBLIC_API_URL` is set, client requests go directly to that URL.
+- If `NEXT_PUBLIC_API_URL` is not set, the client uses `/api` and Next.js rewrite can proxy to `API_PROXY_TARGET`.
+- In local development only, `/api` proxies to `http://localhost:5000` automatically.
+
+## Vercel Deployment (Backend)
+
+Deploy backend as a separate Vercel project with Root Directory set to `server/`.
+
+Required environment variables for backend project:
+
+- `MONGODB_URI`: MongoDB Atlas connection string
+- `JWT_SECRET`: secret used for token signing
+- `JWT_EXPIRES_IN`: token lifetime (example: `7d`)
+- `CLIENT_URL`: deployed frontend URL for CORS (example: `https://your-frontend.vercel.app`)
+
+Backend routes remain under `/api/*` and are handled by `server/api/index.ts`.
