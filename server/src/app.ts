@@ -8,6 +8,7 @@ import memberRoutes from "./routes/member.routes";
 import inventoryRoutes from "./routes/inventory.routes";
 import sessionRoutes from "./routes/session.routes";
 import paymentRoutes from "./routes/payment.routes";
+import notificationRoutes from "./routes/notification.routes";
 
 const normalizeOrigin = (value: string | undefined): string | undefined => {
   const rawValue = value?.trim();
@@ -72,6 +73,7 @@ app.use("/api/members", memberRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
