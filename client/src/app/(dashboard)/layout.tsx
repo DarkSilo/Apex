@@ -12,7 +12,7 @@ function DashboardGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
-      router.push("/login");
+      router.push("/");
     }
   }, [isAuthenticated, loading, router]);
 
@@ -45,9 +45,5 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <AuthProvider>
-      <DashboardGuard>{children}</DashboardGuard>
-    </AuthProvider>
-  );
+  return <DashboardGuard>{children}</DashboardGuard>;
 }

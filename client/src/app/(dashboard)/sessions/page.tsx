@@ -51,10 +51,19 @@ function SessionModal({ session, coaches, currentCoach, onClose, onSave }: Sessi
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const val = e.target.type === "number" ? Number(e.target.value) : e.target.value;
-    setForm({ ...form, [e.target.name]: val });
+    const next = { ...form, [e.target.name]: val };
+    if (e.target.name === "sport" && !currentCoach) {
+      const sportCoaches = coaches.filter((coach) => coach.sport === String(val));
+      next.coachId = sportCoaches[0]?._id || "";
+    }
+    setForm(next);
     setConflict(null);
     setError("");
   };
+
+  const visibleCoaches = currentCoach
+    ? coaches
+    : coaches.filter((coach) => coach.sport === form.sport);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,9 +138,13 @@ function SessionModal({ session, coaches, currentCoach, onClose, onSave }: Sessi
             </div>
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Sport</label>
-              <select name="sport" value={form.sport} onChange={handleChange} className="input-field" id="session-sport">
-                {["Cricket", "Football", "Badminton"].map(s => <option key={s}>{s}</option>)}
-              </select>
+              {currentCoach ? (
+                <div className="input-field text-surface-300">{currentCoach.sport}</div>
+              ) : (
+                <select name="sport" value={form.sport} onChange={handleChange} className="input-field" id="session-sport">
+                  {["Cricket", "Football", "Badminton"].map(s => <option key={s}>{s}</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Start Time</label>
@@ -150,7 +163,7 @@ function SessionModal({ session, coaches, currentCoach, onClose, onSave }: Sessi
               ) : (
                 <select name="coachId" value={form.coachId} onChange={handleChange} className="input-field" required id="session-coach">
                   <option value="">Select coach...</option>
-                  {coaches.map(c => <option key={c._id} value={c._id}>{c.name} ({c.sport})</option>)}
+                  {visibleCoaches.map(c => <option key={c._id} value={c._id}>{c.name} ({c.sport})</option>)}
                 </select>
               )}
             </div>
@@ -186,8 +199,14 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("scheduled");
-  const [filterSport, setFilterSport] = useState("");
+  const [filterSport, setFilterSport] = useState(user?.role === "coach" ? user?.sport || "" : "");
   const [modal, setModal] = useState<{ session: Session | null } | null>(null);
+
+  useEffect(() => {
+    if (user?.role === "coach" && user.sport) {
+      setFilterSport(user.sport);
+    }
+  }, [user]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -256,7 +275,7 @@ export default function SessionsPage() {
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
-            {user?.role !== "member" && (
+            {user?.role !== "member" && user?.role !== "coach" && (
               <select value={filterSport} onChange={(e) => setFilterSport(e.target.value)} className="input-field w-36" id="filter-session-sport">
                 <option value="">All Sports</option>
                 {["Cricket", "Football", "Badminton"].map(s => <option key={s}>{s}</option>)}
