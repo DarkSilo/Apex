@@ -9,9 +9,13 @@ export interface IUser extends Document {
   membershipType: "monthly" | "annual" | "lifetime";
   status: "active" | "inactive";
   phone: string;
+  assignedCoachId?: mongoose.Types.ObjectId;
+  createdByAdminId?: mongoose.Types.ObjectId;
   attendance: Array<{
     date: Date;
-    sessionId: mongoose.Types.ObjectId;
+    sessionId?: mongoose.Types.ObjectId;
+    markedBy?: mongoose.Types.ObjectId;
+    note?: string;
   }>;
   createdAt: Date;
   updatedAt: Date;
@@ -45,10 +49,20 @@ const userSchema = new Schema<IUser>(
       default: "active",
     },
     phone: { type: String, trim: true },
+    assignedCoachId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    createdByAdminId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     attendance: [
       {
         date: { type: Date, default: Date.now },
         sessionId: { type: Schema.Types.ObjectId, ref: "Session" },
+        markedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        note: { type: String, trim: true },
       },
     ],
   },
@@ -57,5 +71,7 @@ const userSchema = new Schema<IUser>(
 
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
+userSchema.index({ assignedCoachId: 1 });
+userSchema.index({ createdByAdminId: 1 });
 
 export default mongoose.model<IUser>("User", userSchema);

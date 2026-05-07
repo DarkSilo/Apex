@@ -4,14 +4,16 @@ export interface IPayment extends Document {
   memberId: mongoose.Types.ObjectId;
   amount: number;
   date: Date;
+  paymentForMonth?: string;
   status: "requested" | "submitted" | "completed" | "pending" | "failed" | "refunded";
-  method: "cash" | "card" | "bank_transfer" | "online";
+  method: "cash" | "card_online" | "bank_transfer";
   description: string;
   receiptNumber: string;
   requestedBy?: mongoose.Types.ObjectId;
   paidAt?: Date;
   memberReference?: string;
   memberNote?: string;
+  slipUrl?: string;
   verifiedBy?: mongoose.Types.ObjectId;
   verifiedAt?: Date;
   verificationNote?: string;
@@ -26,8 +28,9 @@ const paymentSchema = new Schema<IPayment>(
       ref: "User",
       required: true,
     },
-    amount: { type: Number, required: true, min: 0 },
+    amount: { type: Number, required: true, min: 1 },
     date: { type: Date, required: true, default: Date.now },
+    paymentForMonth: { type: String, trim: true },
     status: {
       type: String,
       enum: ["requested", "submitted", "completed", "pending", "failed", "refunded"],
@@ -35,8 +38,8 @@ const paymentSchema = new Schema<IPayment>(
     },
     method: {
       type: String,
-      enum: ["cash", "card", "bank_transfer", "online"],
-      default: "cash",
+      enum: ["cash", "card_online", "bank_transfer"],
+      required: false,
     },
     description: { type: String, trim: true, default: "Membership Fee" },
     receiptNumber: { type: String, unique: true },
@@ -47,6 +50,7 @@ const paymentSchema = new Schema<IPayment>(
     paidAt: { type: Date },
     memberReference: { type: String, trim: true },
     memberNote: { type: String, trim: true },
+    slipUrl: { type: String, trim: true },
     verifiedBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -62,6 +66,7 @@ paymentSchema.index({ date: 1 });
 paymentSchema.index({ status: 1 });
 paymentSchema.index({ requestedBy: 1 });
 paymentSchema.index({ verifiedBy: 1 });
+paymentSchema.index({ paymentForMonth: 1 });
 
 paymentSchema.pre("save", function (next) {
   if (!this.receiptNumber) {
