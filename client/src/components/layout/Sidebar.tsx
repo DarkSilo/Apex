@@ -83,7 +83,7 @@ export default function Sidebar() {
           return (
             <Link key={item.href} href={item.href}>
               <motion.div
-                className={`sidebar-link ${isActive ? "active" : ""}`}
+                className={`sidebar-link group ${isActive ? "active" : ""}`}
                 whileHover={{ x: 4 }}
                 whileTap={{ scale: 0.98 }}
               >
