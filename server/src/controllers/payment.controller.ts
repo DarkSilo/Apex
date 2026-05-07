@@ -2,8 +2,22 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import Payment from "../models/Payment";
 import User from "../models/User";
-import { predictAttendance } from "../services/prediction.service";
+import { predictAttendance, predictClubProfit } from "../services/prediction.service";
 import { AuthRequest } from "../middleware/auth";
+import { notifyAdmins } from "../services/notification.service";
+
+const normalizeMethod = (method: string | undefined): "cash" | "card_online" | "bank_transfer" | undefined => {
+  if (!method) return undefined;
+  if (method === "card" || method === "online") return "card_online";
+  return method as "cash" | "card_online" | "bank_transfer";
+};
+
+const validateAmountByMethod = (amount: number, method?: string): string | null => {
+  if (amount <= 0) {
+    return "Payment amount must be greater than zero.";
+  }
+  return null;
+};
 
 export const getAllPayments = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -37,7 +51,14 @@ export const getAllPayments = async (req: AuthRequest, res: Response): Promise<v
 
 export const createPayment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { memberId, status = "completed" } = req.body;
+    const { memberId, status = "completed", amount, paymentForMonth } = req.body;
+    const method = normalizeMethod(req.body.method);
+
+    const amountError = validateAmountByMethod(amount, method);
+    if (amountError) {
+      res.status(400).json({ message: amountError });
+      return;
+    }
 
     const member = await User.findById(memberId);
     if (!member) {
@@ -45,12 +66,30 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const payment = await Payment.create(req.body);
+    const payment = await Payment.create({
+      ...req.body,
+      method,
+      amount,
+      paymentForMonth,
+    });
     const populated = await payment.populate("memberId", "name email sport");
 
     if (status === "completed" && member.status !== "active") {
       member.status = "active";
       await member.save();
+    }
+
+    if (status === "completed") {
+      await notifyAdmins({
+        type: "payment_completed",
+        title: "Payment Completed",
+        message: `${member.name} completed payment for ${paymentForMonth || "the selected month"}.`,
+        metadata: {
+          memberId: String(member._id),
+          paymentId: String(payment._id),
+          month: paymentForMonth || null,
+        },
+      });
     }
 
     res.status(201).json({ message: "Payment recorded successfully", payment: populated });
@@ -61,7 +100,21 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
 
 export const createPaymentRequest = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { memberId, amount, date, method, description } = req.body;
+    const { memberId, amount, date, description, paymentForMonth, method } = req.body;
+
+    const normalizedMethod = normalizeMethod(method);
+    if (normalizedMethod === "bank_transfer") {
+      res.status(400).json({
+        message: "Payment requests cannot be made with bank transfer. Use cash or Card/Online instead.",
+      });
+      return;
+    }
+
+    const amountError = validateAmountByMethod(amount, normalizedMethod);
+    if (amountError) {
+      res.status(400).json({ message: amountError });
+      return;
+    }
 
     const member = await User.findById(memberId);
     if (!member) {
@@ -73,8 +126,8 @@ export const createPaymentRequest = async (req: AuthRequest, res: Response): Pro
       memberId,
       amount,
       date: date ? new Date(date) : new Date(),
-      method: method || "online",
       description: description || "Membership fee request",
+      paymentForMonth,
       status: "requested",
       requestedBy: req.user?.id,
     });
@@ -107,11 +160,27 @@ export const submitPayment = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    payment.method = req.body.method;
+    const method = normalizeMethod(req.body.method) || "card_online";
+    if (!["cash", "card_online"].includes(method)) {
+      res.status(400).json({ message: "Members can only submit payments using cash or Card/Online." });
+      return;
+    }
+
+    const amountError = validateAmountByMethod(payment.amount, method);
+    if (amountError) {
+      res.status(400).json({ message: amountError });
+      return;
+    }
+
+    payment.method = method;
     payment.memberReference = req.body.memberReference;
     payment.memberNote = req.body.memberNote;
-    payment.paidAt = new Date();
+    payment.paymentForMonth = req.body.paymentForMonth || payment.paymentForMonth;
+    payment.slipUrl = req.body.slipUrl;
     payment.status = "submitted";
+    if (method === "card_online") {
+      payment.paidAt = new Date();
+    }
     await payment.save();
 
     res.json({ message: "Payment submitted successfully", payment });
@@ -150,6 +219,19 @@ export const verifyPayment = async (req: AuthRequest, res: Response): Promise<vo
         member.status = "active";
         await member.save();
       }
+
+      if (member) {
+        await notifyAdmins({
+          type: "payment_completed",
+          title: "Payment Completed",
+          message: `${member.name} payment has been marked as paid for ${payment.paymentForMonth || "the selected month"}.`,
+          metadata: {
+            paymentId: String(payment._id),
+            memberId: String(member._id),
+            month: payment.paymentForMonth || null,
+          },
+        });
+      }
     }
 
     const populated = await payment.populate("memberId", "name email sport");
@@ -163,6 +245,51 @@ export const verifyPayment = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
+export const markCashPaymentAsPaid = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) {
+      res.status(404).json({ message: "Payment not found" });
+      return;
+    }
+
+    if (payment.method !== "cash") {
+      res.status(400).json({ message: "Only cash payments can be manually marked as paid." });
+      return;
+    }
+
+    payment.status = "completed";
+    payment.verifiedBy = req.user?.id ? new mongoose.Types.ObjectId(req.user.id) : undefined;
+    payment.verifiedAt = new Date();
+    payment.verificationNote = req.body.verificationNote || "Cash received offline";
+    payment.paymentForMonth = req.body.paymentForMonth || payment.paymentForMonth;
+    await payment.save();
+
+    const member = await User.findById(payment.memberId);
+    if (member && member.status !== "active") {
+      member.status = "active";
+      await member.save();
+    }
+
+    if (member) {
+      await notifyAdmins({
+        type: "payment_completed",
+        title: "Cash Payment Completed",
+        message: `${member.name} cash payment was marked paid for ${payment.paymentForMonth || "the selected month"}.`,
+        metadata: {
+          paymentId: String(payment._id),
+          memberId: String(member._id),
+          month: payment.paymentForMonth || null,
+        },
+      });
+    }
+
+    res.json({ message: "Cash payment marked as paid", payment });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to mark cash payment", error: error.message });
+  }
+};
+
 export const getMonthlyReport = async (req: Request, res: Response): Promise<void> => {
   try {
     const { year, month } = req.query;
@@ -173,7 +300,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<voi
     const startDate = new Date(targetYear, targetMonth, 1);
     const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59);
 
-    const [payments, summary] = await Promise.all([
+    const [payments, monthlySummary, annualSummary, monthlyBreakdown] = await Promise.all([
       Payment.find({
         date: { $gte: startDate, $lte: endDate },
         status: "completed",
@@ -195,28 +322,52 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<voi
           },
         },
       ]),
-    ]);
 
-    const monthlyBreakdown = await Payment.aggregate([
-      {
-        $match: {
-          date: { $gte: new Date(targetYear, 0, 1), $lte: new Date(targetYear, 11, 31) },
-          status: "completed",
+      Payment.aggregate([
+        {
+          $match: {
+            date: {
+              $gte: new Date(targetYear, 0, 1),
+              $lte: new Date(targetYear, 11, 31, 23, 59, 59),
+            },
+            status: "completed",
+          },
         },
-      },
-      {
-        $group: {
-          _id: { $month: "$date" },
-          revenue: { $sum: "$amount" },
-          count: { $sum: 1 },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: "$amount" },
+            totalPayments: { $sum: 1 },
+            avgPayment: { $avg: "$amount" },
+          },
         },
-      },
-      { $sort: { _id: 1 } },
+      ]),
+
+      Payment.aggregate([
+        {
+          $match: {
+            date: {
+              $gte: new Date(targetYear, 0, 1),
+              $lte: new Date(targetYear, 11, 31, 23, 59, 59),
+            },
+            status: "completed",
+          },
+        },
+        {
+          $group: {
+            _id: { $month: "$date" },
+            revenue: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
     res.json({
       period: { year: targetYear, month: targetMonth + 1 },
-      summary: summary[0] || { totalRevenue: 0, totalPayments: 0, avgPayment: 0 },
+      summary: monthlySummary[0] || { totalRevenue: 0, totalPayments: 0, avgPayment: 0 },
+      annualSummary: annualSummary[0] || { totalRevenue: 0, totalPayments: 0, avgPayment: 0 },
       monthlyBreakdown,
       payments,
     });
@@ -259,8 +410,8 @@ export const getReceipt = async (req: AuthRequest, res: Response): Promise<void>
 
 export const getPrediction = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const result = await predictAttendance();
-    res.json(result);
+    const [attendance, profit] = await Promise.all([predictAttendance(), predictClubProfit()]);
+    res.json({ attendance, profit });
   } catch (error: any) {
     res.status(500).json({ message: "Failed to generate prediction", error: error.message });
   }

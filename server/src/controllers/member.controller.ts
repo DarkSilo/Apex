@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import User from "../models/User";
 import Session from "../models/Session";
 import { AuthRequest } from "../middleware/auth";
@@ -25,7 +26,7 @@ export const getAllMembers = async (req: AuthRequest, res: Response): Promise<vo
         return;
       }
       query.role = "member";
-      query.sport = coach.sport;
+      if (coach.sport) query.sport = coach.sport;
     }
 
     const pageNum = Number.parseInt(page as string, 10);
@@ -52,11 +53,30 @@ export const getAllMembers = async (req: AuthRequest, res: Response): Promise<vo
 
 export const getMemberById = async (req: Request, res: Response): Promise<void> => {
   try {
+    const authReq = req as AuthRequest;
     const member = await User.findById(req.params.id).select("-password");
     if (!member) {
       res.status(404).json({ message: "Member not found" });
       return;
     }
+
+    if (authReq.user?.role === "member" && authReq.user.id !== member._id.toString()) {
+      res.status(403).json({ message: "Access denied." });
+      return;
+    }
+
+    if (authReq.user?.role === "coach") {
+      const coach = await User.findById(authReq.user.id).select("sport");
+      if (!coach) {
+        res.status(404).json({ message: "Coach not found" });
+        return;
+      }
+      if (member.role !== "member" || member.sport !== coach.sport) {
+        res.status(403).json({ message: "Coaches can only view members in their sport." });
+        return;
+      }
+    }
+
     res.json(member);
   } catch (error: any) {
     res.status(500).json({ message: "Failed to fetch member", error: error.message });
@@ -65,19 +85,38 @@ export const getMemberById = async (req: Request, res: Response): Promise<void> 
 
 export const updateMember = async (req: Request, res: Response): Promise<void> => {
   try {
-    const allowedKeys = new Set(["status"]);
+    const allowedKeys = new Set(["status", "assignedCoachId"]);
     const updateKeys = Object.keys(req.body || {});
     const hasInvalidKey = updateKeys.some((key) => !allowedKeys.has(key));
     if (hasInvalidKey) {
       res.status(403).json({
-        message: "Admins can only manage active/inactive status from member management.",
+        message: "Admins can only manage active/inactive status and assigned coach from member management.",
       });
       return;
     }
 
+    const updatePayload: any = { ...req.body };
+    if (typeof updatePayload.assignedCoachId === "string" && !updatePayload.assignedCoachId.trim()) {
+      delete updatePayload.assignedCoachId;
+    }
+
+    if (updatePayload.assignedCoachId) {
+      const coach = await User.findById(updatePayload.assignedCoachId).select("role sport");
+      if (!coach || coach.role !== "coach") {
+        res.status(400).json({ message: "Assigned coach is invalid." });
+        return;
+      }
+      // Check if coach sport matches member sport
+      const member = await User.findById(req.params.id).select("sport");
+      if (member && coach.sport !== member.sport) {
+        res.status(400).json({ message: "Assigned coach must match the member sport." });
+        return;
+      }
+    }
+
     const member = await User.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
+      { $set: updatePayload },
       { new: true, runValidators: true }
     ).select("-password");
 
@@ -112,15 +151,32 @@ export const toggleMemberStatus = async (req: Request, res: Response): Promise<v
   }
 };
 
-export const getAttendance = async (req: Request, res: Response): Promise<void> => {
+export const getAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const member = await User.findById(req.params.id)
-      .select("attendance name")
+      .select("attendance name sport role")
       .populate("attendance.sessionId", "eventName date location");
 
     if (!member) {
       res.status(404).json({ message: "Member not found" });
       return;
+    }
+
+    if (req.user?.role === "member" && req.user.id !== member._id.toString()) {
+      res.status(403).json({ message: "Members can only view their own attendance." });
+      return;
+    }
+
+    if (req.user?.role === "coach") {
+      const coach = await User.findById(req.user.id).select("sport");
+      if (!coach) {
+        res.status(404).json({ message: "Coach not found" });
+        return;
+      }
+      if (member.role !== "member" || member.sport !== coach.sport) {
+        res.status(403).json({ message: "Coaches can only view attendance of members in their sport." });
+        return;
+      }
     }
 
     res.json({ name: member.name, attendance: member.attendance });
@@ -129,9 +185,50 @@ export const getAttendance = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+export const getDailyAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { date } = req.query;
+    const targetDate = date ? new Date(date as string) : new Date();
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const query: any = { role: "member" };
+    if (req.user?.role === "coach") {
+      const coach = await User.findById(req.user.id).select("sport");
+      if (!coach) {
+        res.status(404).json({ message: "Coach not found" });
+        return;
+      }
+      query.sport = coach.sport;
+    }
+
+    const members = await User.find(query).select("name sport attendance");
+
+    const attendanceRecords = members.flatMap((member) =>
+      member.attendance
+        .filter((att) => {
+          const attDate = new Date(att.date);
+          return attDate >= startOfDay && attDate <= endOfDay;
+        })
+        .map((att) => ({
+          memberId: member._id,
+          memberName: member.name,
+          sport: member.sport,
+          date: att.date,
+        }))
+    );
+
+    res.json({ attendance: attendanceRecords });
+  } catch (error: any) {
+    res.status(500).json({ message: "Failed to fetch daily attendance", error: error.message });
+  }
+};
+
 export const logAttendance = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { date, sessionId } = req.body;
+    const { date, sessionId, note } = req.body;
     const member = await User.findById(req.params.id);
 
     if (!member) {
@@ -140,41 +237,62 @@ export const logAttendance = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     if (req.user?.role === "coach") {
-      if (!sessionId) {
-        res.status(400).json({ message: "Session is required for coach attendance logging." });
+      if (member.role !== "member") {
+        res.status(403).json({ message: "Coaches can only mark attendance for members." });
         return;
       }
-
       const coach = await User.findById(req.user.id).select("sport");
       if (!coach) {
         res.status(404).json({ message: "Coach not found" });
         return;
       }
 
-      if (member.role !== "member" || member.sport !== coach.sport) {
+      if (member.sport !== coach.sport) {
         res.status(403).json({
-          message: "Coaches can only log attendance for members in their own sport.",
-        });
-        return;
-      }
-
-      const assignedSession = await Session.findOne({
-        _id: sessionId,
-        coachId: req.user.id,
-        sport: coach.sport,
-      }).select("_id");
-
-      if (!assignedSession) {
-        res.status(403).json({
-          message: "You can only log attendance for your assigned sessions.",
+          message: "Coaches can only log attendance for members in their sport.",
         });
         return;
       }
     }
 
+    if (req.user?.role === "admin" && member.role === "member" && sessionId) {
+      const relatedSession = await Session.findById(sessionId).select("_id");
+      if (!relatedSession) {
+        res.status(400).json({ message: "Session does not exist." });
+        return;
+      }
+    }
+
+    if (req.user?.role === "admin" && member.role === "coach" && member.createdByAdminId) {
+      const creatorId = member.createdByAdminId.toString();
+      if (creatorId && creatorId !== req.user.id) {
+        // Relationship is still preserved, but all admins remain authorized.
+      }
+    }
+
+    if (req.user?.role !== "admin" && member.role === "coach") {
+      res.status(403).json({ message: "Only admins can mark attendance for coaches." });
+      return;
+    }
+
+    const attendanceDate = date ? new Date(date) : new Date();
+
+    // Check if attendance already marked for this date
+    const existingAttendance = member.attendance.find(att => {
+      const attDate = new Date(att.date);
+      return attDate.toDateString() === attendanceDate.toDateString();
+    });
+
+    if (existingAttendance) {
+      res.status(400).json({ message: "Attendance already marked for this date." });
+      return;
+    }
+
     member.attendance.push({
-      date: date ? new Date(date) : new Date(),
+      date: attendanceDate,
       sessionId,
+      markedBy: req.user?.id ? new mongoose.Types.ObjectId(req.user.id) : undefined,
+      note,
     });
 
     await member.save();

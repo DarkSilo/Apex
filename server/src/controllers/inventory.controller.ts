@@ -20,7 +20,8 @@ export const getAllInventory = async (req: Request, res: Response): Promise<void
 
     const itemsWithAlerts = items.map((item) => ({
       ...item.toObject(),
-      isLowStock: item.currentStock <= item.minThreshold,
+      isOutOfStock: item.currentStock === 0,
+      isLowStock: item.currentStock > 0 && item.currentStock <= item.minThreshold,
     }));
 
     res.json(itemsWithAlerts);
@@ -128,6 +129,8 @@ export const getLowStockAlerts = async (_req: Request, res: Response): Promise<v
         currentStock: item.currentStock,
         minThreshold: item.minThreshold,
         sport: item.sport,
+        isOutOfStock: item.currentStock === 0,
+        isLowStock: item.currentStock > 0 && item.currentStock <= item.minThreshold,
         deficit: item.minThreshold - item.currentStock,
       })),
     });

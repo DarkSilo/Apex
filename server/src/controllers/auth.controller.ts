@@ -26,12 +26,40 @@ const generateTokens = (user: any) => {
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, email, password, role, sport, membershipType, phone } = req.body;
+    const authReq = req as AuthRequest;
+    const { name, email, password, role, sport, membershipType, phone, assignedCoachId } = req.body;
+    const targetRole = role || "member";
+    const cleanAssignedCoachId =
+      assignedCoachId && String(assignedCoachId).trim() ? String(assignedCoachId).trim() : undefined;
 
-    const existingUser = await User.findOne({ email });
+    if (targetRole !== "member") {
+      if (authReq.user?.role !== "admin") {
+        res.status(403).json({ message: "Only admins can create coach or admin accounts." });
+        return;
+      }
+    }
+
+    const existingUser = await User.findOne({ email: String(email).toLowerCase() });
     if (existingUser) {
       res.status(409).json({ message: "Email already registered" });
       return;
+    }
+
+    if (cleanAssignedCoachId && targetRole !== "member") {
+      res.status(400).json({ message: "Coach assignment is only valid for members." });
+      return;
+    }
+
+    if (cleanAssignedCoachId) {
+      const assignedCoach = await User.findById(cleanAssignedCoachId).select("role sport");
+      if (!assignedCoach || assignedCoach.role !== "coach") {
+        res.status(400).json({ message: "Assigned coach is invalid." });
+        return;
+      }
+      if (assignedCoach.sport !== sport) {
+        res.status(400).json({ message: "Assigned coach must match the member sport." });
+        return;
+      }
     }
 
     const salt = await bcrypt.genSalt(12);
@@ -39,12 +67,14 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const user = await User.create({
       name,
-      email,
+      email: String(email).toLowerCase(),
       password: hashedPassword,
-      role: role || "member",
+      role: targetRole,
       sport,
       membershipType: membershipType || "monthly",
       phone,
+      assignedCoachId: cleanAssignedCoachId,
+      createdByAdminId: targetRole === "coach" && authReq.user?.id ? authReq.user.id : undefined,
     });
 
     const tokens = generateTokens(user);
@@ -154,6 +184,11 @@ export const updateMe = async (req: AuthRequest, res: Response): Promise<void> =
       return;
     }
 
+    if (req.user?.role === "admin") {
+      res.status(403).json({ message: "Administrators cannot modify their own profile." });
+      return;
+    }
+
     const updates: any = {
       name: req.body.name,
       phone: req.body.phone,
@@ -161,9 +196,24 @@ export const updateMe = async (req: AuthRequest, res: Response): Promise<void> =
       membershipType: req.body.membershipType,
     };
 
+    if (updates.phone) {
+      updates.phone = String(updates.phone).trim();
+    }
+
     Object.keys(updates).forEach((key) => {
       if (updates[key] === undefined) delete updates[key];
     });
+
+    // If member is changing sport, check if assigned coach matches new sport
+    if (req.user?.role === "member" && updates.sport) {
+      const currentUser = await User.findById(userId).select("assignedCoachId sport");
+      if (currentUser?.assignedCoachId && currentUser.sport !== updates.sport) {
+        const assignedCoach = await User.findById(currentUser.assignedCoachId).select("sport");
+        if (assignedCoach && assignedCoach.sport !== updates.sport) {
+          updates.assignedCoachId = undefined; // Remove assignment if sport doesn't match
+        }
+      }
+    }
 
     const user = await User.findByIdAndUpdate(
       userId,
@@ -187,6 +237,11 @@ export const changeMyPassword = async (req: AuthRequest, res: Response): Promise
     const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
+    if (req.user?.role === "admin") {
+      res.status(403).json({ message: "Administrators cannot change their own password via this endpoint." });
       return;
     }
 
@@ -225,6 +280,11 @@ export const deleteMyAccount = async (req: AuthRequest, res: Response): Promise<
     const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
+    if (req.user?.role === "admin") {
+      res.status(403).json({ message: "Administrators cannot delete their own accounts." });
       return;
     }
 
