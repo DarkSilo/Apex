@@ -4,7 +4,9 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Zap, Mail, Lock, User, Phone, Eye, EyeOff } from "lucide-react";
-import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/AuthContext";
+
+import PublicNavbar from "@/components/layout/PublicNavbar";
 
 function RegisterForm() {
   const [formData, setFormData] = useState({
@@ -18,29 +20,66 @@ function RegisterForm() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFieldErrors((prev) => {
+      const clone = { ...prev };
+      delete clone[e.target.name];
+      return clone;
+    });
+  };
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?[0-9]{10,15}$/;
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+
+    if (!emailRegex.test(formData.email)) {
+      errors.email = "Enter a valid email address.";
+    }
+    if (formData.phone && !phoneRegex.test(formData.phone)) {
+      errors.phone = "Phone number must contain 10-15 digits.";
+    }
+    if (!passwordRegex.test(formData.password)) {
+      errors.password = "Use at least 8 chars with upper, lower, number, and symbol.";
+    }
+    if (formData.password !== formData.confirmPassword) {
+      errors.confirmPassword = "Passwords do not match.";
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
+    if (!validateForm()) {
+      setError("Please fix validation errors before continuing.");
       return;
     }
 
     setLoading(true);
     try {
-      const { confirmPassword, ...data } = formData;
+      const { ...data } = formData;
       await register(data);
       router.push("/dashboard");
     } catch (err: any) {
+      const apiErrors = err.response?.data?.errors as Array<{ field: string; message: string }> | undefined;
+      if (apiErrors?.length) {
+        const mapped: Record<string, string> = {};
+        apiErrors.forEach((item) => {
+          mapped[item.field] = item.message;
+        });
+        setFieldErrors(mapped);
+      }
       setError(err.response?.data?.message || "Registration failed.");
     } finally {
       setLoading(false);
@@ -48,7 +87,9 @@ function RegisterForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-950 px-4 py-12">
+    <div className="min-h-screen bg-surface-950">
+      <PublicNavbar />
+      <div className="flex items-center justify-center px-4 py-20 relative">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 -left-32 w-96 h-96 bg-brand-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-brand-700/10 rounded-full blur-3xl" />
@@ -119,6 +160,7 @@ function RegisterForm() {
                   id="register-email"
                 />
               </div>
+              {fieldErrors.email && <p className="text-xs text-danger-400 mt-1.5">{fieldErrors.email}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -166,6 +208,7 @@ function RegisterForm() {
                   id="register-phone"
                 />
               </div>
+              {fieldErrors.phone && <p className="text-xs text-danger-400 mt-1.5">{fieldErrors.phone}</p>}
             </div>
 
             <div>
@@ -178,19 +221,21 @@ function RegisterForm() {
                   value={formData.password}
                   onChange={handleChange}
                   className="input-field pl-11 pr-11"
-                  placeholder="Min 6 characters"
+                  placeholder="Min 8 chars, upper/lower, number, symbol"
                   required
-                  minLength={6}
+                  minLength={8}
                   id="register-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-[10px] text-surface-500 mt-1.5 leading-relaxed">Password must include uppercase, lowercase, number, and symbol.</p>
+              {fieldErrors.password && <p className="text-xs text-danger-400 mt-1.5">{fieldErrors.password}</p>}
             </div>
 
             <div>
@@ -209,6 +254,7 @@ function RegisterForm() {
                   id="register-confirm-password"
                 />
               </div>
+              {fieldErrors.confirmPassword && <p className="text-xs text-danger-400 mt-1.5">{fieldErrors.confirmPassword}</p>}
             </div>
 
             <button
@@ -233,14 +279,11 @@ function RegisterForm() {
           </p>
         </div>
       </motion.div>
+      </div>
     </div>
   );
 }
 
 export default function RegisterPage() {
-  return (
-    <AuthProvider>
-      <RegisterForm />
-    </AuthProvider>
-  );
+  return <RegisterForm />;
 }
