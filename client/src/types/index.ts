@@ -8,6 +8,8 @@ export interface User {
   membershipType: "monthly" | "annual" | "lifetime";
   status: "active" | "inactive";
   phone: string;
+  assignedCoachId?: User | string;
+  createdByAdminId?: User | string;
   attendance: AttendanceRecord[];
   createdAt: string;
   updatedAt: string;
@@ -16,6 +18,8 @@ export interface User {
 export interface AttendanceRecord {
   date: string;
   sessionId?: string;
+  markedBy?: string;
+  note?: string;
 }
 
 export interface InventoryUsageEntry {
@@ -37,6 +41,7 @@ export interface InventoryItem {
   sport: string;
   description: string;
   isLowStock?: boolean;
+  isOutOfStock?: boolean;
   usageHistory?: InventoryUsageEntry[];
   createdAt: string;
   updatedAt: string;
@@ -63,14 +68,16 @@ export interface Payment {
   memberId: User | string;
   amount: number;
   date: string;
+  paymentForMonth?: string;
   status: "requested" | "submitted" | "completed" | "pending" | "failed" | "refunded";
-  method: "cash" | "card" | "bank_transfer" | "online";
+  method?: "cash" | "card_online" | "bank_transfer";
   description: string;
   receiptNumber: string;
   requestedBy?: User | string;
   paidAt?: string;
   memberReference?: string;
   memberNote?: string;
+  slipUrl?: string;
   verifiedBy?: User | string;
   verifiedAt?: string;
   verificationNote?: string;
@@ -87,6 +94,45 @@ export interface DashboardStats {
 }
 
 export interface PredictionData {
+  attendance: {
+    model: { intercept: number; slope: number };
+    totalDataPoints: number;
+    chartData: Array<{
+      week: string;
+      label: string;
+      actual: number | null;
+      predicted: number;
+    }>;
+    predictions: Array<{ week: number; predicted: number }>;
+    peakPeriod: { week: number; predicted: number };
+  };
+  profit: {
+    model: { intercept: number; slope: number };
+    activeMembers: number;
+    history: Array<{
+      x: number;
+      month: string;
+      revenue: number;
+      expense: number;
+      profit: number;
+    }>;
+    forecasts: Array<{ month: string; projectedProfit: number }>;
+    nextMonthProjection: { month: string; projectedProfit: number } | null;
+  };
+}
+
+export interface NotificationItem {
+  _id: string;
+  type: "session_created" | "session_cancelled" | "session_deleted" | "session_rescheduled" | "payment_completed";
+  channel: "in_app" | "email";
+  title: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LegacyPredictionData {
   model: { intercept: number; slope: number };
   totalDataPoints: number;
   chartData: Array<{
@@ -102,6 +148,11 @@ export interface PredictionData {
 export interface MonthlyReport {
   period: { year: number; month: number };
   summary: {
+    totalRevenue: number;
+    totalPayments: number;
+    avgPayment: number;
+  };
+  annualSummary: {
     totalRevenue: number;
     totalPayments: number;
     avgPayment: number;
