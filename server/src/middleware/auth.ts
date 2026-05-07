@@ -35,3 +35,30 @@ export const authenticate = (
     res.status(401).json({ message: "Invalid or expired token." });
   }
 };
+
+export const authenticateOptional = (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+): void => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      next();
+      return;
+    }
+
+    const token = authHeader.split(" ")[1];
+    const secret = process.env.JWT_SECRET || "fallback_secret";
+    const decoded = jwt.verify(token, secret) as {
+      id: string;
+      role: string;
+      email: string;
+    };
+
+    req.user = decoded;
+    next();
+  } catch {
+    next();
+  }
+};
