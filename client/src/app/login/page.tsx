@@ -4,7 +4,9 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Zap, Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/AuthContext";
+
+import PublicNavbar from "@/components/layout/PublicNavbar";
 
 function LoginForm() {
   const [email, setEmail] = useState("");
@@ -31,7 +33,9 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-950 px-4">
+    <div className="min-h-screen bg-surface-950">
+      <PublicNavbar />
+      <div className="flex items-center justify-center px-4 py-20 relative">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 -left-32 w-96 h-96 bg-brand-500/10 rounded-full blur-3xl" />
@@ -150,13 +154,10 @@ function LoginForm() {
         </motion.div>
       </motion.div>
     </div>
+  </div>
   );
 }
 
 export default function LoginPage() {
-  return (
-    <AuthProvider>
-      <LoginForm />
-    </AuthProvider>
-  );
+  return <LoginForm />;
 }
