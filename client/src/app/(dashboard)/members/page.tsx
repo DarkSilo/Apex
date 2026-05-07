@@ -19,12 +19,13 @@ interface MemberModalProps {
   member: IUser | null;
   mode: "view" | "edit" | "add";
   canManageAttendance: boolean;
-  attendanceSessions: Session[];
+  currentUserRole?: "admin" | "coach" | "member";
+  coaches: IUser[];
   onClose: () => void;
   onSave: () => void;
 }
 
-function MemberModal({ member, mode, canManageAttendance, attendanceSessions, onClose, onSave }: MemberModalProps) {
+function MemberModal({ member, mode, canManageAttendance, currentUserRole, coaches, onClose, onSave }: MemberModalProps) {
   const [form, setForm] = useState({
     name: member?.name || "",
     email: member?.email || "",
@@ -34,21 +35,35 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
     phone: member?.phone || "",
     status: member?.status || "active",
     role: member?.role || "member",
+    assignedCoachId:
+      typeof member?.assignedCoachId === "object"
+        ? member.assignedCoachId?._id
+        : member?.assignedCoachId || "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceMsg, setAttendanceMsg] = useState("");
-  const [selectedSessionId, setSelectedSessionId] = useState("");
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const next = { ...form, [e.target.name]: e.target.value };
+    if (e.target.name === "role" && e.target.value !== "member") {
+      next.assignedCoachId = "";
+    }
+    setForm(next);
+    setFieldErrors((prev) => {
+      const clone = { ...prev };
+      delete clone[e.target.name];
+      return clone;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setFieldErrors({});
     try {
       if (mode === "add") {
         await api.post("/auth/register", form);
@@ -59,6 +74,14 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
       onSave();
       onClose();
     } catch (err: any) {
+      const apiErrors = err.response?.data?.errors as Array<{ field: string; message: string }> | undefined;
+      if (apiErrors?.length) {
+        const mapped: Record<string, string> = {};
+        apiErrors.forEach((item) => {
+          mapped[item.field] = item.message;
+        });
+        setFieldErrors(mapped);
+      }
       setError(err.response?.data?.message || "Operation failed");
     } finally {
       setLoading(false);
@@ -67,16 +90,11 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
 
   const handleLogAttendance = async () => {
     if (!member) return;
-    if (!selectedSessionId) {
-      setAttendanceMsg("Please select a session first.");
-      return;
-    }
     setAttendanceLoading(true);
     setAttendanceMsg("");
     try {
       await api.post(`/members/${member._id}/attendance`, {
         date: new Date().toISOString(),
-        sessionId: selectedSessionId,
       });
       setAttendanceMsg("Attendance logged successfully.");
       onSave();
@@ -138,18 +156,8 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
                 </div>
               ))}
             </div>
-            {canManageAttendance && member.role === "member" && (
+            {canManageAttendance && (member.role === "member" || (currentUserRole === "admin" && member.role === "coach")) && (
               <div className="pt-3 border-t border-surface-700/40">
-                <select
-                  className="input-field mb-2"
-                  value={selectedSessionId}
-                  onChange={(e) => setSelectedSessionId(e.target.value)}
-                >
-                  <option value="">Select related session...</option>
-                  {attendanceSessions.map((s) => (
-                    <option key={s._id} value={s._id}>{s.eventName} ({formatDate(s.date)})</option>
-                  ))}
-                </select>
                 <button
                   type="button"
                   onClick={handleLogAttendance}
@@ -179,10 +187,13 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
                   <div className="col-span-2">
                     <label className="block text-xs font-medium text-surface-400 mb-1.5">Email</label>
                     <input name="email" type="email" value={form.email} onChange={handleChange} className="input-field" placeholder="email@apex.lk" required id="member-email" />
+                  {fieldErrors.email && <p className="text-xs text-danger-400 mt-1">{fieldErrors.email}</p>}
                   </div>
                   <div className="col-span-2">
                     <label className="block text-xs font-medium text-surface-400 mb-1.5">Password</label>
-                    <input name="password" type="password" value={form.password} onChange={handleChange} className="input-field" placeholder="Min 6 characters" required minLength={6} id="member-password" />
+                    <input name="password" type="password" value={form.password} onChange={handleChange} className="input-field" placeholder="Min 8 chars, upper/lower/number/symbol" required minLength={8} id="member-password" />
+                    <p className="text-xs text-surface-500 mt-1">Password must include uppercase, lowercase, number, and symbol.</p>
+                    {fieldErrors.password && <p className="text-xs text-danger-400 mt-1">{fieldErrors.password}</p>}
                   </div>
                 </>
               )}
@@ -204,6 +215,27 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
                   {["member", "coach", "admin"].map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
                 </select>
               </div>
+              {form.role === "member" && (
+                <div>
+                  <label className="block text-xs font-medium text-surface-400 mb-1.5">Assigned Coach</label>
+                  <select
+                    name="assignedCoachId"
+                    value={form.assignedCoachId}
+                    onChange={handleChange}
+                    className="input-field"
+                    id="member-assigned-coach"
+                  >
+                    <option value="">Unassigned</option>
+                    {coaches
+                      .filter((coach) => coach.sport === form.sport)
+                      .map((coach) => (
+                        <option key={coach._id} value={coach._id}>
+                          {coach.name} ({coach.sport})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-surface-400 mb-1.5">Phone</label>
                 <input name="phone" value={form.phone} onChange={handleChange} className="input-field" placeholder="+94 77 ..." id="member-phone" />
@@ -234,7 +266,7 @@ function MemberModal({ member, mode, canManageAttendance, attendanceSessions, on
 export default function MembersPage() {
   const { user } = useAuth();
   const [members, setMembers] = useState<IUser[]>([]);
-  const [attendanceSessions, setAttendanceSessions] = useState<Session[]>([]);
+  const [coaches, setCoaches] = useState<IUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState("");
@@ -260,14 +292,16 @@ export default function MembersPage() {
       }
 
       const requests: Promise<any>[] = [api.get(`/members?${params}`)];
-      if (user?.role === "coach") {
-        requests.push(api.get(`/sessions?coachId=${user.id || user._id}&status=scheduled`));
+      if (user?.role === "admin") {
+        requests.push(api.get("/members?role=coach&limit=100"));
       }
 
-      const [res, sessionsRes] = await Promise.all(requests);
+      const [res, secondRes] = await Promise.all(requests);
       setMembers(res.data.members);
       setTotalPages(res.data.pagination.pages);
-      setAttendanceSessions(sessionsRes?.data || []);
+      if (user?.role === "admin") {
+        setCoaches(secondRes?.data?.members || []);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -422,7 +456,8 @@ export default function MembersPage() {
             member={modal.member}
             mode={modal.mode}
             canManageAttendance={user?.role === "admin" || user?.role === "coach"}
-            attendanceSessions={attendanceSessions}
+            currentUserRole={user?.role}
+            coaches={coaches}
             onClose={() => setModal(null)}
             onSave={fetchMembers}
           />
