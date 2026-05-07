@@ -1,4 +1,6 @@
 import User from "../models/User";
+import Payment from "../models/Payment";
+import Inventory from "../models/Inventory";
 
 interface DataPoint {
   x: number;
@@ -86,5 +88,81 @@ export async function predictAttendance() {
     chartData,
     predictions,
     peakPeriod: predictions.reduce((max, p) => (p.predicted > max.predicted ? p : max), predictions[0]),
+  };
+}
+
+export async function predictClubProfit() {
+  const now = new Date();
+  const startWindow = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+  const [completedPayments, activeMembers, recurringPurchaseData] = await Promise.all([
+    Payment.find({ status: "completed", date: { $gte: startWindow } }).select("amount date"),
+    User.countDocuments({ role: "member", status: "active" }),
+    Inventory.aggregate([
+      { $unwind: "$usageHistory" },
+      { $match: { "usageHistory.date": { $gte: startWindow }, "usageHistory.type": "in" } },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$usageHistory.date" },
+            month: { $month: "$usageHistory.date" },
+          },
+          expenseProxy: { $sum: "$usageHistory.change" },
+        },
+      },
+    ]),
+  ]);
+
+  const monthlyRevenueMap: Record<string, number> = {};
+  completedPayments.forEach((payment) => {
+    const date = new Date(payment.date);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    monthlyRevenueMap[key] = (monthlyRevenueMap[key] || 0) + Number(payment.amount || 0);
+  });
+
+  const expenseMap: Record<string, number> = {};
+  recurringPurchaseData.forEach((entry: any) => {
+    const key = `${entry._id.year}-${String(entry._id.month).padStart(2, "0")}`;
+    expenseMap[key] = Number(entry.expenseProxy || 0) * 50;
+  });
+
+  const monthlyProfitSeries = Array.from({ length: 12 }, (_, idx) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (11 - idx), 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const revenue = monthlyRevenueMap[key] || 0;
+    const expense = expenseMap[key] || 0;
+    return {
+      x: idx + 1,
+      month: key,
+      revenue,
+      expense,
+      profit: revenue - expense,
+    };
+  });
+
+  const regressionData: DataPoint[] = monthlyProfitSeries.map((entry) => ({ x: entry.x, y: entry.profit }));
+  const { intercept, slope } = linearRegression(regressionData);
+
+  const futureMonths = 6;
+  const forecasts = Array.from({ length: futureMonths }, (_, idx) => {
+    const step = monthlyProfitSeries.length + idx + 1;
+    const projected = Math.round(intercept + slope * step + activeMembers * 20);
+    const futureDate = new Date(now.getFullYear(), now.getMonth() + idx + 1, 1);
+    const month = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, "0")}`;
+    return {
+      month,
+      projectedProfit: projected,
+    };
+  });
+
+  return {
+    model: {
+      intercept: Math.round(intercept * 100) / 100,
+      slope: Math.round(slope * 100) / 100,
+    },
+    activeMembers,
+    history: monthlyProfitSeries,
+    forecasts,
+    nextMonthProjection: forecasts[0] || null,
   };
 }
