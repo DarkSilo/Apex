@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { DollarSign, Plus, Receipt, XCircle, TrendingUp, CheckCircle2 } from "lucide-react";
+import { DollarSign, Plus, Receipt, XCircle, TrendingUp, CheckCircle2, CreditCard, ShieldCheck } from "lucide-react";
 import Topbar from "@/components/layout/Topbar";
 import api from "@/lib/api";
 import { Payment, User } from "@/types";
@@ -25,7 +25,7 @@ interface PaymentModalProps {
 function AdminPaymentModal({ onClose, onSave, members, mode }: PaymentModalProps) {
   const [form, setForm] = useState({
     memberId: "", amount: 2500, date: new Date().toISOString().split("T")[0],
-    status: "completed", method: "cash", description: "Membership Fee",
+    status: "completed", method: "cash", description: "Membership Fee", paymentForMonth: new Date().toISOString().slice(0, 7),
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -47,14 +47,20 @@ function AdminPaymentModal({ onClose, onSave, members, mode }: PaymentModalProps
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
+    if ((form.method === "cash" || form.method === "card_online") && Number(form.amount) <= 0) {
+      setError("Payment amount must be greater than zero.");
+      setLoading(false);
+      return;
+    }
     try {
       if (mode === "request") {
         await api.post("/payments/request", {
           memberId: form.memberId,
           amount: form.amount,
           date: form.date,
-          method: form.method,
           description: form.description,
+          paymentForMonth: form.paymentForMonth,
         });
       } else {
         await api.post("/payments", form);
@@ -92,20 +98,24 @@ function AdminPaymentModal({ onClose, onSave, members, mode }: PaymentModalProps
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Amount (LKR)</label>
-              <input name="amount" type="number" min={0} value={form.amount} onChange={handleChange} className="input-field" required id="pay-amount" />
+              <input name="amount" type="number" min={1} value={form.amount} onChange={handleChange} className="input-field" required id="pay-amount" />
             </div>
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Date</label>
               <input name="date" type="date" value={form.date} onChange={handleChange} className="input-field" required id="pay-date" />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-surface-400 mb-1.5">Method</label>
-              <select name="method" value={form.method} onChange={handleChange} className="input-field" id="pay-method">
-                {["cash", "card", "bank_transfer", "online"].map(m => (
-                  <option key={m} value={m} className="capitalize">{m.replace("_", " ")}</option>
-                ))}
-              </select>
-            </div>
+            {mode !== "request" && (
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1.5">Method</label>
+                <select name="method" value={form.method} onChange={handleChange} className="input-field" id="pay-method">
+                  {["cash", "card_online", "bank_transfer"].map(m => (
+                    <option key={m} value={m} className="capitalize">
+                      {m === "card_online" ? "Card/Online" : m.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1.5">Status</label>
               {mode === "request" ? (
@@ -118,6 +128,17 @@ function AdminPaymentModal({ onClose, onSave, members, mode }: PaymentModalProps
                 </select>
               )}
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-surface-400 mb-1.5">Payment Month</label>
+            <input
+              name="paymentForMonth"
+              type="month"
+              value={form.paymentForMonth}
+              onChange={handleChange}
+              className="input-field"
+              id="pay-month"
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-surface-400 mb-1.5">Description</label>
@@ -144,18 +165,75 @@ function MemberSubmitModal({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const [method, setMethod] = useState<"cash" | "card" | "bank_transfer" | "online">("online");
+  const [method, setMethod] = useState<"cash" | "card_online">("card_online");
   const [memberReference, setMemberReference] = useState("");
   const [memberNote, setMemberNote] = useState("");
+  const [paymentForMonth, setPaymentForMonth] = useState(payment.paymentForMonth || new Date(payment.date).toISOString().slice(0, 7));
+  const [slipUrl, setSlipUrl] = useState(payment.slipUrl || "");
+  const [cardHolder, setCardHolder] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const member = payment.memberId as User;
+  const monthLabel = paymentForMonth ? new Date(`${paymentForMonth}-01`).toLocaleString(undefined, { month: "long", year: "numeric" }) : "selected month";
+
+  const formatCardNumber = (raw: string) => raw.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
+
+  const validateCardPortal = (): string | null => {
+    const digits = cardNumber.replace(/\s/g, "");
+    if (digits.length !== 16) return "Card number must contain 16 digits.";
+    if (!cardHolder.trim()) return "Card holder name is required.";
+    if (!/^\d{2}\/\d{2}$/.test(cardExpiry)) return "Expiry must be in MM/YY format.";
+    if (!/^\d{3,4}$/.test(cardCvv)) return "CVV must be 3 or 4 digits.";
+
+    const [mm, yy] = cardExpiry.split("/").map((v) => Number(v));
+    if (mm < 1 || mm > 12) return "Expiry month must be between 01 and 12.";
+    const now = new Date();
+    const currentYear = now.getFullYear() % 100;
+    const currentMonth = now.getMonth() + 1;
+    if (yy < currentYear || (yy === currentYear && mm < currentMonth)) {
+      return "Card is expired.";
+    }
+
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    if (payment.amount <= 0) {
+      setError("Payment amount must be greater than zero.");
+      setLoading(false);
+      return;
+    }
+
+    if (method === "card_online") {
+      const cardError = validateCardPortal();
+      if (cardError) {
+        setError(cardError);
+        setLoading(false);
+        return;
+      }
+    }
+
+    const finalReference = method === "card_online"
+      ? `MOCK-${Date.now()}-${cardNumber.replace(/\s/g, "").slice(-4)}`
+      : "CASH-PAYMENT";
+    const portalNote = method === "card_online"
+      ? `Mock card portal payment (${cardNumber.replace(/\s/g, "").slice(-4)})`
+      : "Cash payment selected";
+
     try {
-      await api.patch(`/payments/${payment._id}/submit`, { method, memberReference, memberNote });
+      await api.patch(`/payments/${payment._id}/submit`, {
+        method,
+        memberReference: finalReference,
+        memberNote: `${memberNote}${memberNote && portalNote ? " | " : ""}${portalNote}`,
+        paymentForMonth,
+      });
       onSave();
       onClose();
     } catch (err: any) {
@@ -168,22 +246,84 @@ function MemberSubmitModal({
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="glass-card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold text-surface-100 mb-4">Submit Mock Payment</h2>
+        <div className="mb-4 rounded-lg border border-brand-500/30 bg-brand-500/10 px-3 py-2">
+          <p className="text-xs text-brand-300 font-semibold">Payment Notification</p>
+          <p className="text-xs text-surface-200 mt-0.5">{member?.name || "Member"} is paying for {monthLabel}</p>
+        </div>
+        <h2 className="text-lg font-bold text-surface-100 mb-4">Submit Payment</h2>
         <p className="text-xs text-surface-400 mb-4">Amount: {formatCurrency(payment.amount)}</p>
         {error && <div className="mb-3 p-2 rounded bg-danger-500/10 border border-danger-500/20 text-danger-400 text-xs">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-surface-400 mb-1">Method</label>
-            <select value={method} onChange={(e) => setMethod(e.target.value as any)} className="input-field">
-              {["cash", "card", "bank_transfer", "online"].map((m) => (
-                <option key={m} value={m}>{m.replace("_", " ")}</option>
-              ))}
+            <label className="block text-xs text-surface-400 mb-1">Payment Month</label>
+            <input type="month" value={paymentForMonth} onChange={(e) => setPaymentForMonth(e.target.value)} className="input-field" />
+          </div>
+
+          <div>
+            <label className="block text-xs text-surface-400 mb-1">Payment Method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value as "cash" | "card_online")} className="input-field">
+              <option value="card_online">Card/Online</option>
+              <option value="cash">Cash</option>
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-surface-400 mb-1">Payment Reference</label>
-            <input value={memberReference} onChange={(e) => setMemberReference(e.target.value)} className="input-field" placeholder="e.g. MOCKTXN-12345" required />
-          </div>
+
+          {method === "card_online" ? (
+            <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/15 to-surface-900 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-brand-300 flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Card/Online Payment Portal</p>
+                <p className="text-[10px] text-surface-400 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Test Mode</p>
+              </div>
+              <div>
+                <label className="block text-xs text-surface-400 mb-1">Card Number</label>
+                <input
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                  className="input-field"
+                  placeholder="4242 4242 4242 4242"
+                  inputMode="numeric"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-surface-400 mb-1">Card Holder Name</label>
+                <input value={cardHolder} onChange={(e) => setCardHolder(e.target.value)} className="input-field" placeholder="JOHN DOE" required />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-surface-400 mb-1">Expiry (MM/YY)</label>
+                  <input
+                    value={cardExpiry}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^\d]/g, "").slice(0, 4);
+                      const formatted = raw.length > 2 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
+                      setCardExpiry(formatted);
+                    }}
+                    className="input-field"
+                    placeholder="08/28"
+                    inputMode="numeric"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-surface-400 mb-1">CVV</label>
+                  <input
+                    value={cardCvv}
+                    onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    className="input-field"
+                    placeholder="123"
+                    inputMode="numeric"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-surface-700/50 bg-surface-800/60 p-4 text-surface-300">
+              <p className="text-sm font-medium">Cash payment selected.</p>
+              <p className="text-xs text-surface-500 mt-1">Once the cash is received, an admin can confirm the payment as paid.</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs text-surface-400 mb-1">Note (optional)</label>
             <input value={memberNote} onChange={(e) => setMemberNote(e.target.value)} className="input-field" />
@@ -257,6 +397,7 @@ export default function PaymentsPage() {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [submitTarget, setSubmitTarget] = useState<Payment | null>(null);
   const [verifyTarget, setVerifyTarget] = useState<Payment | null>(null);
+  const [cashPaidLoadingId, setCashPaidLoadingId] = useState<string | null>(null);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const actionablePayments = payments.filter((p) => {
     const normalizedStatus = String(p.status || "").trim().toLowerCase();
@@ -312,6 +453,20 @@ export default function PaymentsPage() {
     w.print();
   };
 
+  const handleMarkCashPaid = async (payment: Payment) => {
+    setCashPaidLoadingId(payment._id);
+    try {
+      await api.patch(`/payments/${payment._id}/cash-paid`, {
+        paymentForMonth: payment.paymentForMonth,
+      });
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCashPaidLoadingId(null);
+    }
+  };
+
   const statusSummary = [
     { label: "Total Revenue", value: formatCurrency(totalRevenue), color: "text-success-400" },
     { label: "Requested", value: payments.filter(p => p.status === "requested").length, color: "text-brand-400" },
@@ -326,6 +481,7 @@ export default function PaymentsPage() {
       <div className="p-8 space-y-6">
         {normalizedRole === "member" && (
           <div className="glass-card p-4 border border-brand-500/20">
+            <p className="text-xs uppercase tracking-wider text-brand-400 mb-1">My Payment Dashboard</p>
             <p className="text-sm text-surface-200">
               You have <span className="font-semibold text-brand-300">{myActionableCount}</span> payment request{myActionableCount === 1 ? "" : "s"} to submit.
             </p>
@@ -380,8 +536,8 @@ export default function PaymentsPage() {
             </select>
             <select value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)} className="input-field w-40" id="pay-filter-method">
               <option value="">All Methods</option>
-              {["cash", "card", "bank_transfer", "online"].map(m => (
-                <option key={m} value={m}>{m.replace("_", " ")}</option>
+              {["cash", "card_online"].map(m => (
+                <option key={m} value={m}>{m === "card_online" ? "Card/Online" : m.replace("_", " ")}</option>
               ))}
             </select>
           </div>
@@ -447,7 +603,7 @@ export default function PaymentsPage() {
                         </td>
                         <td><span className="font-bold text-success-400">{formatCurrency(p.amount)}</span></td>
                         <td><span className="text-surface-400 text-sm">{formatDate(p.date)}</span></td>
-                        <td><span className="text-surface-300 capitalize text-sm">{p.method?.replace("_", " ")}</span></td>
+                        <td><span className="text-surface-300 capitalize text-sm">{p.method ? p.method.replace("_", " ") : "Pending"}</span></td>
                         <td><span className="text-surface-400 text-sm truncate max-w-[150px] block">{p.description}</span></td>
                         <td>
                           <div className="space-y-1">
@@ -475,6 +631,15 @@ export default function PaymentsPage() {
                             {normalizedRole === "admin" && normalizedStatus === "submitted" && (
                               <button onClick={() => setVerifyTarget(p)} className="p-1.5 hover:bg-surface-700 rounded-lg text-surface-400 hover:text-success-400 transition-colors" title="Verify payment" id={`verify-${p._id}`}>
                                 <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {normalizedRole === "admin" && (normalizedStatus === "requested" || normalizedStatus === "pending" || normalizedStatus === "submitted") && p.method === "cash" && (
+                              <button
+                                onClick={() => handleMarkCashPaid(p)}
+                                className="btn-secondary px-2 py-1 text-[10px]"
+                                disabled={cashPaidLoadingId === p._id}
+                              >
+                                {cashPaidLoadingId === p._id ? "Updating..." : "Mark Cash Paid"}
                               </button>
                             )}
                           </div>
