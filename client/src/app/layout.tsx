@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   keywords: ["sports club", "management", "Sri Lanka", "members", "inventory", "training"],
 };
 
+import { AuthProvider } from "@/context/AuthContext";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -21,7 +23,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} dark`}>
       <body className="min-h-screen bg-surface-950 font-sans antialiased">
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
