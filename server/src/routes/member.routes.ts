@@ -5,6 +5,7 @@ import {
   updateMember,
   toggleMemberStatus,
   getAttendance,
+  getDailyAttendance,
   logAttendance,
   getDashboardStats,
 } from "../controllers/member.controller";
@@ -19,6 +20,7 @@ router.use(authenticate);
 
 router.get("/stats", authorize("admin", "coach", "member"), getDashboardStats);
 router.get("/", authorize("admin", "coach", "member"), getAllMembers);
+router.get("/attendance/today", authorize("admin", "coach"), getDailyAttendance);
 router.get("/:id", getMemberById);
 router.put("/:id", authorize("admin"), validate(updateMemberSchema), updateMember);
 router.patch("/:id/status", authorize("admin"), toggleMemberStatus);
