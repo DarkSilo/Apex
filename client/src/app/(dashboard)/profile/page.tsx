@@ -40,6 +40,11 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (user?.role === "admin") {
+      router.replace("/dashboard");
+      return;
+    }
+
     const loadProfile = async () => {
       try {
         const res = await api.get("/auth/me");
